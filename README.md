@@ -19,46 +19,142 @@ Báo cáo này trình bày chi tiết quá trình triển khai và đánh giá h
 
 ### Giai đoạn 1: Cấu hình Cơ bản và Làm quen Giao diện
 
-*(Thực hiện tương tự Giai đoạn 1 của kịch bản trước)*
+1.  **Truy cập và Khám phá Giao diện:**
+    * Mở trình duyệt trên máy PC, truy cập `https://192.168.1.xxx`.
+    * Đăng nhập bằng tài khoản quản trị (vd: `admin`, không mật khẩu hoặc mật khẩu mặc định nếu có).
+    * Dành thời gian điều hướng qua các menu chính để làm quen: `System`, `FortiView`, `User`, `Policy`, `Server Objects`, `Application Delivery`, `Web Protection`, `Bot Mitigation`, `API Protection`, `DoS Protection`, `Log & Report`, `Monitor`.
 
-1.  **Truy cập và Khám phá Giao diện:** Đăng nhập và làm quen với các menu chính.
-2.  **Cấu hình Server Pool (Real Server):** Tạo Server Pool `DVWA` với Real Server là `172.16.4.241:80`.
-3.  **Cấu hình Virtual Server (VIP):** Tạo Virtual Server `DVWA-VIP` sử dụng IP Interface `port2`.
-4.  **Cấu hình X-Forwarded-For (XFF):** Tạo Profile `XFF-Rule` và cấu hình `Trusted X-Header Sources`.
-5.  **Kiểm tra Truy cập Ban đầu:** Truy cập `http://dvwa.hcmute.com`, đảm bảo trang DVWA hiển thị.
+2.  **Cấu hình Server Pool (Real Server):**
+    * Điều hướng đến `Server Objects > Server > Server Pool`.
+    * Nhấn `Create New`.
+    * Cấu hình các thông số:
+        * `Name`: `DVWA`
+        * `Type`: `Reverse Proxy`
+        * `Single Server/Server Balance`: `Single Server`
+    * Trong mục `Server Pool Member`, nhấn `Create New`.
+    * Cấu hình Real Server:
+        * `Status`: `Enable`
+        * `Server Type`: `IP`
+        * `Domain`: `172.16.4.241` (IP của máy chủ DVWA)
+        * `Port`: `80`
+    * Nhấn `OK` để lưu Real Server.
+    * Nhấn `OK` để lưu Server Pool.
+
+3.  **Cấu hình Virtual Server (VIP):**
+    * Điều hướng đến `Server Objects > Server > Virtual Server`.
+    * Nhấn `Create New`.
+    * Đặt `Name`: `DVWA-VIP`.
+    * Nhấn `OK`.
+    * Trong danh sách Virtual Server Item của `DVWA-VIP`, nhấn `Create New`.
+    * Cấu hình:
+        * Check vào ô `Use Interface IP`.
+        * `Interface`: Chọn `port2` (cổng kết nối mạng chứa Web Server hoặc cổng mà người dùng sẽ truy cập vào).
+    * Nhấn `OK`.
+
+4.  **Cấu hình X-Forwarded-For (XFF):**
+    * **Mục đích:** Khi FortiWeb hoạt động ở chế độ Reverse Proxy, IP nguồn mà Web Server nhìn thấy là IP của FortiWeb. XFF giúp chèn IP gốc của Client vào HTTP Header để Web Server có thể ghi nhận.
+    * Điều hướng đến `Server Objects > X-Forwarded-For`.
+    * Nhấn `Create New`.
+    * Cấu hình Profile XFF:
+        * `Name`: `XFF-Rule`
+        * Bật (check) các tùy chọn: `Add X-Forwarded-For`, `Add X-Forwarded-Proto`, `Add X-Real-IP` (tùy chọn theo yêu cầu).
+    * Trong mục `Trusted X-Header Sources`, nhấn `Create New`:
+        * Nhập IP của Virtual Server (`10.1.1.252`). Nhấn `OK`.
+    * Nhấn `Create New` lần nữa:
+        * Nhập IP của Real Server (`172.16.4.241`). Nhấn `OK`.
+    * Nhấn `OK` để lưu Profile XFF.
+
+5.  **Kiểm tra Truy cập Ban đầu:**
+    * Từ trình duyệt máy PC, truy cập `http://dvwa.hcmute.com`.
+    * **Kết quả mong đợi:** Trang đăng nhập của DVWA hiển thị thành công.
 
 ### Giai đoạn 2: Tấn công và Phòng chống SQL Injection
 
-*(Thực hiện tương tự Giai đoạn 2 của kịch bản trước)*
+1.  **Mô phỏng Tấn công SQLi (Chưa bảo vệ):**
+    * Truy cập `http://dvwa.hcmute.com`, đăng nhập vào DVWA (vd: `admin`/`password`).
+    * Trong menu bên trái, chọn `DVWA Security`, đặt mức `Security Level` thành `low`. Nhấn `Submit`.
+    * Chọn mục `SQL Injection`.
+    * Trong ô `User ID`, nhập payload: `' or '1'='1' union select version(), database()#`
+    * Nhấn `Submit`.
+    * **Kết quả mong đợi:** Thông tin về phiên bản MySQL và tên database (`dvwa`) được hiển thị. Cuộc tấn công thành công.
 
-1.  **Mô phỏng Tấn công SQLi (Chưa bảo vệ):** Đăng nhập DVWA (đặt Security Level `low`), vào mục SQL Injection, thử payload `' or '1'='1' union select version(), database()#`. **Kết quả mong đợi:** Tấn công thành công, thấy thông tin DB.
 2.  **Cấu hình Phòng chống SQLi:**
-    * Tạo Signature Policy `SQLi-Policy` (Action: `Alert & Deny` cho SQL Injection & Generic Attacks).
-    * Tạo Web Protection Profile `Base-Protection-Profile` (Sử dụng Signature `SQLi-Policy` và XFF `XFF-Rule`).
-    * Tạo Server Policy `Policy_Protect_DVWA` (Áp dụng `Base-Protection-Profile` cho `DVWA-VIP` và `DVWA` Server Pool).
-3.  **Kiểm tra sau khi Bảo vệ:** Thử lại tấn công SQLi. **Kết quả mong đợi:** Bị chặn bởi FortiWeb. Kiểm tra log Attack.
+    * **Tạo Signature Policy:**
+        * Điều hướng đến `Web Protection > Known Attacks > Signatures`.
+        * Nhấn `Create New`.
+        * `Name`: `SQLi-Policy`
+        * Trong danh sách `Main Class Name`:
+            * Tìm đến `SQL Injection`, `SQL Injection (Extended)`, `Generic Attacks`, `Generic Attacks (Extended)`.
+            * Đảm bảo cột `Status` được bật (Enable).
+            * Đặt `Action` thành `Alert & Deny`.
+            * Các signature khác có thể để `Disable` hoặc `Alert`.
+        * Nhấn `OK`.
+    * **Tạo Web Protection Profile:**
+        * Điều hướng đến `Policy > Web Protection Profile > Inline Protection Profile`.
+        * Nhấn `Create New`.
+        * `Name`: `Base-Protection-Profile`
+        * Trong phần `Inline Standard Protection`:
+            * `Signatures`: Chọn `SQLi-Policy` vừa tạo.
+        * Trong phần `HTTP Header Security`:
+            * `X-Forwarded-For`: Chọn `XFF-Rule` đã tạo.
+        * Nhấn `OK`.
+    * **Tạo Server Policy:**
+        * Điều hướng đến `Policy > Server Policy`.
+        * Nhấn `Create New`.
+        * `Name`: `Policy_Protect_DVWA`
+        * `Deployment Mode`: `Reverse Proxy` (thường mặc định)
+        * `Virtual Server`: Chọn `DVWA-VIP`.
+        * `Server Pool`: Chọn `DVWA`.
+        * `HTTP Service`: Chọn `HTTP` (hoặc tạo mới nếu chưa có).
+        * `Web Protection Profile`: Chọn `Base-Protection-Profile`.
+        * Nhấn `OK`.
+
+3.  **Kiểm tra sau khi Bảo vệ:**
+    * Lặp lại bước mô phỏng tấn công SQLi (Bước 1 của Giai đoạn 2).
+    * **Kết quả mong đợi:** FortiWeb chặn yêu cầu, trình duyệt hiển thị trang "Web Page Blocked!".
+    * **Kiểm tra Log:**
+        * Điều hướng đến `Log & Report > Log Access > Attack`.
+        * Tìm log mới nhất. Quan sát thông tin: `Date/Time`, `Policy` (`Policy_Protect_DVWA`), `Source` (IP máy PC), `Destination` (IP Real Server), `Main Type` (`SQL Injection`), `Action` (`Deny`), `Signature` (ID của signature đã kích hoạt).
 
 ### Giai đoạn 3: Tấn công và Phòng chống XSS
 
-*(Thực hiện tương tự Giai đoạn 3 của kịch bản trước, nhưng sẽ cập nhật Profile để gộp bảo vệ)*
+1.  **Mô phỏng Tấn công XSS (Đã có bảo vệ SQLi, chưa có XSS):**
+    * **Reflected XSS:**
+        * Trong DVWA (vẫn ở mức `low`), chọn mục `XSS (Reflected)`.
+        * Trong ô `What's your name?`, nhập payload: `<script>alert('XSS Reflected Test')</script>`
+        * Nhấn `Submit`.
+        * **Kết quả mong đợi:** Hộp thoại alert với nội dung "XSS Reflected Test" xuất hiện. Tấn công thành công.
+    * **Stored XSS:**
+        * Chọn mục `XSS (Stored)`.
+        * Trong ô `Name`, nhập `TestName`.
+        * Trong ô `Message`, nhập payload: `<script>alert(document.cookie)</script>`
+        * Nhấn `Sign Guestbook`.
+        * Tải lại trang hoặc điều hướng đi rồi quay lại trang `XSS (Stored)`.
+        * **Kết quả mong đợi:** Hộp thoại alert chứa thông tin cookie của người dùng (bao gồm cả session ID) xuất hiện. Tấn công thành công.
 
-1.  **Mô phỏng Tấn công XSS (Chưa bảo vệ XSS):**
-    * **Reflected:** Vào mục XSS (Reflected) (level `low`), thử payload `<script>alert('XSS Reflected Test')</script>`. **Kết quả mong đợi:** Alert box hiện ra.
-    * **Stored:** Vào mục XSS (Stored) (level `low`), thử payload `<script>alert(document.cookie)</script>`. **Kết quả mong đợi:** Alert box chứa cookie hiện ra sau khi submit/reload.
-2.  **Cấu hình Phòng chống XSS (Cập nhật Profile):**
-    * **Tạo Signature Policy:** Tạo Signature Policy `XSS-Policy` (Action: `Alert & Deny` cho Cross Site Scripting).
-    * **Tạo Signature Policy Gộp (Khuyến nghị):**
+2.  **Cấu hình Phòng chống XSS:**
+    * **Tạo Signature Policy:**
         * Điều hướng đến `Web Protection > Known Attacks > Signatures`.
-        * Nhấn `Create New`. Đặt tên `Combined-SQLi-XSS-Policy`.
-        * Kích hoạt (`Enable`, Action `Alert & Deny`) các signatures cho `SQL Injection`, `SQL Injection (Extended)`, `Generic Attacks`, `Generic Attacks (Extended)`, `Cross Site Scripting`, `Cross Site Scripting (Extended)`.
+        * Nhấn `Create New`.
+        * `Name`: `XSS-Policy`
+        * Trong danh sách `Main Class Name`:
+            * Tìm đến `Cross Site Scripting`, `Cross Site Scripting (Extended)`.
+            * Đảm bảo `Status` là `Enable` và `Action` là `Alert & Deny`.
+            * Các signature khác đặt là `Disable`.
         * Nhấn `OK`.
     * **Cập nhật Web Protection Profile:**
         * Điều hướng đến `Policy > Web Protection Profile > Inline Protection Profile`.
         * Chọn và **Edit** Profile `Base-Protection-Profile`.
         * Trong phần `Inline Standard Protection`:
-            * `Signatures`: Thay đổi thành `Combined-SQLi-XSS-Policy` (hoặc policy gộp bạn vừa tạo).
+            * `Signatures`: **Thay đổi** từ `SQLi-Policy` thành `XSS-Policy`. *(Lưu ý: Để bảo vệ cả hai, bạn cần tạo một Signature Policy gộp cả SQLi và XSS, hoặc sử dụng các tính năng Profile nâng cao nếu có. Trong kịch bản này, chúng ta tạm thời chỉ bật XSS để kiểm tra theo cấu trúc lab).*
         * Nhấn `OK`.
-3.  **Kiểm tra sau khi Bảo vệ:** Thử lại cả tấn công Reflected và Stored XSS. **Kết quả mong đợi:** Bị chặn bởi FortiWeb. Kiểm tra log Attack.
+
+3.  **Kiểm tra sau khi Bảo vệ:**
+    * Lặp lại cả hai bước mô phỏng tấn công Reflected và Stored XSS (Bước 1 của Giai đoạn 3).
+    * **Kết quả mong đợi:** FortiWeb chặn các yêu cầu chứa payload XSS, hiển thị trang "Web Page Blocked!".
+    * **Kiểm tra Log:**
+        * Điều hướng đến `Log & Report > Log Access > Attack`.
+        * Tìm các log mới nhất liên quan đến XSS bị chặn.
 
 ### Giai đoạn 4: Tấn công và Phòng chống Command Injection (Mới)
 
@@ -127,36 +223,118 @@ Báo cáo này trình bày chi tiết quá trình triển khai và đánh giá h
     * **Kết quả mong đợi:** Việc upload có thể bị chặn ngay bởi FortiWeb (nếu signature phát hiện), hoặc upload thành công nhưng khi truy cập để thực thi shell (bước thực thi shell) sẽ bị chặn.
     * **Kiểm tra Log:** Kiểm tra log Attack, tìm các log liên quan đến `Malicious File Upload`, `Web Shell` hoặc các signature tương ứng.
 
-### Giai đoạn 7: Tấn công và Phòng chống DoS (Đã tích hợp bảo vệ khác)
+### Giai đoạn 7: Tấn công và Phòng chống DoS
 
-*(Thực hiện tương tự Giai đoạn 4 của kịch bản trước, nhưng đảm bảo Profile đã gộp các bảo vệ)*
+1.  **Mô phỏng Tấn công DoS (Chưa bảo vệ DoS):**
+    * **Chuẩn bị:** Mở `XAMPP Control Panel`, nhấn nút `Shell`.
+    * **Thực hiện:** Chạy lệnh sau trong cửa sổ shell vừa mở:
+        ```bash
+        ab -c 100 -n 2000 [http://dvwa.hcmute.com/login.php](http://dvwa.hcmute.com/login.php)
+        ```
+        *(Giải thích: `-c 100`: 100 kết nối đồng thời, `-n 2000`: tổng cộng 2000 yêu cầu. Bạn có thể điều chỉnh các giá trị này)*.
+    * **Quan sát:** Theo dõi output của lệnh `ab`. Ghi lại các thông số như `Complete requests`, `Failed requests`, `Requests per second`.
+    * **Kết quả mong đợi:** Phần lớn hoặc toàn bộ request thành công (`Failed requests: 0`), tốc độ `Requests per second` tương đối ổn định.
 
-1.  **Mô phỏng Tấn công DoS:** Chạy lệnh `ab -c 100 -n 2000 http://dvwa.hcmute.com/login.php`. Quan sát kết quả ban đầu (nếu chưa bật DoS protection trong profile).
-2.  **Cấu hình Phòng chống DoS (Cập nhật Profile):**
-    * Tạo `DoS-Access-Limit` Rule, `DoS-Flood-Prevent` Rule, `DoS-Policy` như kịch bản trước.
-    * **Cập nhật Web Protection Profile:**
+2.  **Cấu hình Phòng chống DoS:**
+    * **Tạo HTTP Access Limit Rule:**
+        * Điều hướng đến `DoS Protection > Application > HTTP Access Limit`.
+        * Nhấn `Create New`.
+        * `Name`: `DoS-Access-Limit`
+        * `HTTP Request Limit/sec (Standalone IP)`: `200` (hoặc giá trị phù hợp)
+        * `HTTP Request Limit/sec (Shared IP)`: `200` (hoặc giá trị phù hợp)
+        * `Action`: `Block Period`
+        * `Block Period`: `600` (giây)
+        * `Severity`: `High`
+        * Nhấn `OK`.
+    * **Tạo HTTP Flood Prevention Rule:** (Thường dùng trong mode Transparent, nhưng cấu hình để hoàn chỉnh)
+        * Điều hướng đến `DoS Protection > Application > HTTP Flood Prevention`.
+        * Nhấn `Create New`.
+        * `Name`: `DoS-Flood-Prevent`
+        * `HTTP Request Limit/sec`: `200`
+        * `Action`: `Block Period`
+        * `Block Period`: `600`
+        * `Severity`: `High`
+        * Nhấn `OK`.
+    * **Tạo DoS Protection Policy:**
+        * Điều hướng đến `DoS Protection > DoS Protection Policy`.
+        * Nhấn `Create New`.
+        * `Name`: `DoS-Policy`
+        * `HTTP Access Limit`: Chọn `DoS-Access-Limit`.
+        * `HTTP Flood Prevention`: Chọn `DoS-Flood-Prevent`.
+        * Nhấn `OK`.
+    * **Cập nhật Web Protection Profile (Kết hợp các bảo vệ):**
         * Điều hướng đến `Policy > Web Protection Profile > Inline Protection Profile`.
         * Chọn và **Edit** Profile `Base-Protection-Profile`.
-        * Đảm bảo `Inline Standard Protection > Signatures` đang sử dụng policy gộp (`Combined-All-Policy`).
-        * Trong phần `DoS Protection`: Chọn `DoS-Policy`.
+        * Trong phần `Inline Standard Protection`:
+            * `Signatures`: Chọn lại `SQLi-Policy` **HOẶC** tạo một Signature Policy mới (`Combined-Signatures`) bao gồm cả SQLi và XSS signatures rồi chọn nó. *(Để đảm bảo bảo vệ toàn diện, nên tạo policy gộp)*.
+        * Trong phần `DoS Protection`:
+            * `DoS Protection Policy`: Chọn `DoS-Policy`.
         * Nhấn `OK`.
-3.  **Kiểm tra sau khi Bảo vệ:** Chạy lại lệnh `ab`. **Kết quả mong đợi:** Tấn công bị giới hạn/chặn. Kiểm tra log Attack/Event liên quan đến DoS.
 
-### Giai đoạn 8: Quét Lỗ hổng Bảo mật (Sau khi áp dụng bảo vệ)
+3.  **Kiểm tra sau khi Bảo vệ:**
+    * Chạy lại lệnh `ab` như ở Bước 1 của Giai đoạn 4.
+    * **Quan sát:** Lệnh `ab` sẽ chạy một lúc rồi báo lỗi, ví dụ: `apr_socket_recv: Connection reset by peer (104)` hoặc tương tự.
+    * **Kết quả mong đợi:** Số lượng `Complete requests` giảm đáng kể, `Failed requests` tăng lên, `Requests per second` giảm mạnh sau khi ngưỡng bị vượt qua.
+    * **Kiểm tra Log:**
+        * Điều hướng đến `Log & Report > Log Access > Attack` hoặc `Event`.
+        * Tìm các log liên quan đến `HTTP Access Limit Violation` hoặc `DoS Protection`.
 
-*(Thực hiện tương tự Giai đoạn 5 của kịch bản trước)*
+### Giai đoạn 8: Quét Lỗ hổng Bảo mật
 
-1.  **Cấu hình và Chạy Scan:** Tạo Scan Profile `DVWA-FullScan`, tạo Scan Policy `DVWA-ScanNow-Policy` (Type `Run Now`, Profile `DVWA-FullScan`, Format `HTML`), chạy và đợi hoàn thành.
-2.  **Xem Kết quả:** Download và xem báo cáo scan từ `Scan History`. **Kết quả mong đợi:** Báo cáo có thể vẫn phát hiện một số lỗ hổng ở tầng ứng dụng (vì WAF không sửa code gốc), nhưng cũng có thể cho thấy một số tấn công không thực hiện được do bị WAF chặn ở tầng ngoài. Phân tích sự khác biệt nếu bạn đã từng scan trước khi bật WAF.
+1.  **Cấu hình và Chạy Scan:**
+    * **Tạo Scan Profile:**
+        * Điều hướng đến `Web Vulnerability Scan > Scan Profile`.
+        * Nhấn `Create New`.
+        * `Name`: `DVWA-FullScan`
+        * `Scan Target`: Nhập `dvwa.hcmute.com`.
+        * `Scan Template`: Chọn `Full Audit`.
+        * Nhấn `OK`.
+    * **Tạo và Chạy Scan Policy:**
+        * Điều hướng đến `Web Vulnerability Scan > Web Vulnerability Scan Policy`.
+        * Nhấn `Create New`.
+        * `Name`: `DVWA-ScanNow-Policy`
+        * `Type`: Chọn `Run Now`.
+        * `Profile`: Chọn `DVWA-FullScan`.
+        * `Report Format`: Chọn `HTML`.
+        * Nhấn `OK`.
+    * **Theo dõi:** Quan sát cột `Status` của policy vừa tạo, trạng thái sẽ chuyển từ `Starting` -> `Scanning` -> `Done`. Quá trình này có thể mất vài phút đến vài chục phút tùy thuộc vào ứng dụng web.
 
-### Giai đoạn 9: Giám sát và Báo cáo (Toàn diện)
+2.  **Xem Kết quả Scan:**
+    * Sau khi trạng thái là `Done`, điều hướng đến `Web Vulnerability Scan > Scan History`.
+    * Tìm đến dòng tương ứng với `DVWA-ScanNow-Policy`.
+    * Nhấn vào biểu tượng `Download` ở cột `Action`.
+    * Mở file báo cáo (`.html`) vừa tải về bằng trình duyệt.
+    * **Kết quả mong đợi:** Báo cáo chi tiết các lỗ hổng bảo mật (theo mức độ High, Medium, Low) được tìm thấy trên trang `dvwa.hcmute.com`, bao gồm mô tả lỗ hổng, URL bị ảnh hưởng, và đôi khi có gợi ý khắc phục.
 
-*(Thực hiện tương tự Giai đoạn 6 của kịch bản trước, nhưng bao quát hơn)*
+### Giai đoạn 9: Giám sát và Báo cáo
 
-1.  **Giám sát Trạng thái Hệ thống:** Sử dụng `System > Status > Status` để xem tổng quan tài nguyên, throughput, và các sự kiện tấn công mới nhất (bao gồm cả các loại tấn công mới được thêm vào).
-2.  **Sử dụng FortiView:** Khám phá sâu hơn các biểu đồ, áp dụng filter cho các loại tấn công cụ thể (SQLi, XSS, OS Commanding, Directory Traversal, DoS...) để thấy rõ hoạt động bảo vệ của WAF.
-3.  **Phân tích Log Chi tiết:** Vào `Log & Report > Log Access > Attack`, xem xét kỹ lưỡng các log của tất cả các loại tấn công đã thực hiện, hiểu rõ thông tin chi tiết mà FortiWeb cung cấp.
-4.  **Xuất Báo cáo:** Tạo và xem xét các báo cáo tổng hợp (`Security Analysis`, `Attack Event Summary`), đảm bảo chúng phản ánh đầy đủ các hoạt động tấn công và phòng thủ đã diễn ra trong toàn bộ kịch bản nâng cao.
+1.  **Giám sát Trạng thái Hệ thống:**
+    * Điều hướng đến `System > Status > Status`.
+    * Quan sát các widget:
+        * `System Resources`: CPU, Memory usage.
+        * `System Information`: Trạng thái HA, phiên bản Firmware, Uptime.
+        * `Throughput`: Biểu đồ lưu lượng mạng đi qua FortiWeb.
+        * `Attack Event History`: Thống kê số lượng tấn công theo mức độ nghiêm trọng.
+        * `Attack Log Widget`: Các log tấn công gần nhất.
+        * `HTTP Transactions`: Số lượng giao dịch HTTP.
+
+2.  **Sử dụng FortiView:**
+    * Điều hướng đến `FortiView`.
+    * Khám phá các tab khác nhau như `Threats`, `Sources`, `Destinations`, `Policies`, `Applications`.
+    * Sử dụng các bộ lọc (Filter) và thay đổi khoảng thời gian (Time Interval) để xem dữ liệu trực quan về các cuộc tấn công, nguồn gốc, đích đến, và chính sách nào đã được áp dụng.
+
+3.  **Phân tích Log Chi tiết:**
+    * Điều hướng đến `Log & Report > Log Access`.
+    * Xem lại các log trong `Attack`, `Traffic`, `Event`.
+    * Click vào một dòng log để xem chi tiết (Log Details), bao gồm HTTP Headers, Parameters, Cookies, thông tin về Signature ID, Severity Level, Action Taken.
+
+4.  **Xuất Báo cáo:**
+    * Điều hướng đến `Log & Report > Report`.
+    * Xem danh sách các mẫu báo cáo (`Report Templates`) có sẵn.
+    * Chọn một mẫu phù hợp (ví dụ: `Security Analysis Report`, `Attack Event Summary`).
+    * Nhấn `Run Now` (hoặc cấu hình `Schedule` nếu muốn chạy định kỳ).
+    * Sau khi báo cáo được tạo (`Status` là `Done`), nhấn `Download` để tải về (thường ở định dạng PDF).
+    * Xem xét nội dung báo cáo tổng hợp về tình hình an ninh trong khoảng thời gian đã chọn.
 
 ## Kết Luận (Nâng Cao)
 
